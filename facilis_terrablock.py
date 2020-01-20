@@ -20,16 +20,13 @@ def terrablock_commands(command, server_name, volume_name):
     if(command == 'mount'):
         if os.path.exists(volume_path):
             if not os.listdir(volume_path):
-                #tb_command = os.system(f'factbcmd legacy_fc_mount {server_name} {volume_name}')
-                print(f'factbcmd legacy_fc_mount {server_name} {volume_name}')
+                tb_command = os.system(f'factbcmd legacy_fc_mount {server_name} {volume_name}')
             else:
                 return False
         else:
-            #tb_command = os.system(f'factbcmd legacy_fc_mount {server_name} {volume_name}')
-            print(f'factbcmd legacy_fc_mount {server_name} {volume_name}')
+            tb_command = os.system(f'factbcmd legacy_fc_mount {server_name} {volume_name}')
     elif(command == 'unmount'):
-        #tb_command = os.system(f'factbcmd legacy_fc_unmount {volume_name}')
-        print(f'factbcmd legacy_fc_unmount {volume_name}')
+        tb_command = os.system(f'factbcmd legacy_fc_unmount {volume_name}')
 
     if tb_command == 0:
         return True
@@ -43,10 +40,9 @@ def terrablock_get_list():
     volumes_df = pd.DataFrame(columns=volume_columns)
 
     # Export the latest list of volumes from our Terrablocks.  Import into a panda and delete the volume list file.
-    #os.system('factbcmd list_volumes > /tmp/volume_list.txt')
-    #temp_df = pd.read_csv('/tmp/volume_list.txt', sep = '=', header = None, index_col = False)
-    temp_df = pd.read_csv('/Users/schang/Desktop/volume_list.txt', sep='=', header=None, index_col=False)
-    #os.system('rm /tmp/volume_list.txt')
+    os.system('factbcmd list_volumes > /tmp/volume_list.txt')
+    temp_df = pd.read_csv('/tmp/volume_list.txt', sep = '=', header = None, index_col = False)
+    os.system('rm /tmp/volume_list.txt')
 
     # Create temp arrays for each item we need.
     volume_UID_col = temp_df.loc[temp_df.loc[:, 0].str.contains('volume UID')][1]
