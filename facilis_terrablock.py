@@ -1,8 +1,7 @@
 import importlib.util
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QDialog, QPushButton,
                              QTableWidget, QTableWidgetItem, QMessageBox, QMenuBar, QAction)
-
-# from fbs_runtime.application_context.PyQt5 import ApplicationContext
+from fbs_runtime.application_context.PyQt5 import ApplicationContext
 from PyQt5.QtGui import QColor
 from PyQt5.QtCore import Qt
 
@@ -10,6 +9,7 @@ import subprocess
 import pandas as pd
 import sys
 import os
+import pickle
 
 # Function to run mount/unmount commands to our Terrablocks for given volume.
 def terrablock_commands(command, server_name, volume_name):
@@ -40,9 +40,9 @@ def terrablock_get_list():
     volumes_df = pd.DataFrame(columns=volume_columns)
 
     # Export the latest list of volumes from our Terrablocks.  Import into a panda and delete the volume list file.
-    os.system('factbcmd list_volumes > /tmp/volume_list.txt')
-    temp_df = pd.read_csv('/tmp/volume_list.txt', sep = '=', header = None, index_col = False)
-    os.system('rm /tmp/volume_list.txt')
+    os.system('factbcmd list_volumes > ~/.volume_list.txt')
+    temp_df = pd.read_csv('~/.volume_list.txt', sep = '=', header = None, index_col = False)
+    os.system('rm ~/.volume_list.txt')
 
     # Create temp arrays for each item we need.
     volume_UID_col = temp_df.loc[temp_df.loc[:, 0].str.contains('volume UID')][1]
@@ -72,6 +72,7 @@ class User_Input(QWidget):
         self.top = 0
         self.width = 530
         self.height = 500
+        self.mounted_volumes = []
         self.initUI()
 
     def initUI(self):
@@ -79,6 +80,7 @@ class User_Input(QWidget):
         self.setGeometry(self.left, self.top, self.width, self.height)
 
         self.create_table()
+        self.check_mounted_volumes()
 
         self.layout = QVBoxLayout()
         self.layout.addWidget(self.table_widget)
@@ -87,6 +89,9 @@ class User_Input(QWidget):
         refresh_action = QAction('Refresh', self)
         refresh_action.setShortcut('Ctrl+R')
         refresh_action.triggered.connect(self.refresh_list)
+        unmount_all_action = QAction('Unmount All', self)
+        unmount_all_action.setShortcut('Ctrl+U')
+        unmount_all_action.triggered.connect(self.unmount_all)
         quit_action = QAction('Close', self)
         quit_action.setShortcut('Ctrl+C')
         quit_action.triggered.connect(self.close)
@@ -94,12 +99,14 @@ class User_Input(QWidget):
         menu_bar = QMenuBar()
         file_menu = menu_bar.addMenu('File')
         file_menu.addAction(refresh_action)
+        file_menu.addAction(unmount_all_action)
         file_menu.addSeparator()
         file_menu.addAction(quit_action)
         self.layout.addWidget(menu_bar)
 
         self.show()
 
+    # Creates inital table for all Terrablock volumes.
     def create_table(self):
         header = ['', 'Volume Name', 'Capacity', 'Available', 'Server']
         volumes_df = terrablock_get_list()
@@ -121,18 +128,41 @@ class User_Input(QWidget):
 
         self.og_bg_color = self.table_widget.item(1, 1).background()
 
+    # Checks to see if there were any mounted volumes prior to launch.
+    def check_mounted_volumes(self):
+        if os.path.exists('.mounted.volumes'):
+            with open('.mounted.volumes', 'rb') as pickleFileHandler:
+                self.mounted_volumes = pickle.load(pickleFileHandler)
+            if(self.mounted_volumes):
+                for volume in self.mounted_volumes:
+                    row = self.table_widget.findItems(volume, Qt.MatchExactly)[0].row()
+                    volume_name = self.table_widget.item(row, 1).text()
+                    server_name = self.table_widget.item(row, 4).text()
+                    button = self.table_widget.cellWidget(row, 0)
+                    command = 'mount'
+                    if(terrablock_commands(command, server_name, volume_name)):
+                        button.setText('Unmount')
+                        button.setChecked(True)
+                    for col in range(1, 5):
+                        self.table_widget.item(row, col).setBackground(QColor(0, 0, 255, 35))
+
+    # Changes the state of button once Terrablock volume is mounted/unmounted.
     def on_click(self):
         button = self.sender()
         if button:
             row = self.table_widget.indexAt(button.pos()).row()
         volume_name = self.table_widget.item(row, 1).text()
         server_name = self.table_widget.item(row, 4).text()
+        volume_uid = self.table_widget.item(row, 5).text()
         if button.isChecked():
             command = 'mount'
             if(terrablock_commands(command, server_name, volume_name)):
                 button.setText('Unmount')
                 for col in range(1, 5):
                     self.table_widget.item(row, col).setBackground(QColor(0, 0, 255, 35))
+                self.mounted_volumes.append(volume_uid)
+                with open('.mounted.volumes', 'wb') as pickleFileHandler:
+                    pickle.dump(self.mounted_volumes, pickleFileHandler)
             else:
                 button.setChecked(False)
                 self.popup_error(volume_name)
@@ -142,9 +172,12 @@ class User_Input(QWidget):
                 button.setText('Mount')
                 for col in range(1, 5):
                     self.table_widget.item(row, col).setBackground(self.og_bg_color)
+                self.mounted_volumes.remove(volume_uid)
+                with open('.mounted.volumes', 'wb') as pickleFileHandler:
+                    pickle.dump(self.mounted_volumes, pickleFileHandler)
 
+    # Creates a new row for newly added Terrablock volume upon refresh.
     def create_row(self, index, row):
-
         # Column 0 Mount Button
         self.mount_button = QPushButton()
         self.mount_button.setMinimumWidth(90)
@@ -179,6 +212,7 @@ class User_Input(QWidget):
         self.table_widget.setItem(index, 5, self.vuid_item)
         self.table_widget.setColumnHidden(5, True)
 
+    # Deletes a row for any Terrablock volume that is no longer available after refresh.
     def delete_row(self, volume_uid):
         row = self.table_widget.findItems(volume_uid, Qt.MatchExactly)[0].row()
         server_name = self.table_widget.item(row, 4).text()
@@ -189,6 +223,7 @@ class User_Input(QWidget):
             QMessageBox.about(
                 self, 'Error', f'Could not remove {volume_name}, volume is in use.  Please unmount.')
 
+    # Gets updated Terrablock volume list.  Updates all rows from new updated list.
     def refresh_list(self):
         self.table_widget.setSortingEnabled(False)
 
@@ -259,18 +294,35 @@ class User_Input(QWidget):
 
         self.table_widget.setSortingEnabled(True)
 
+    # Allows user to unmount all volumes.
+    def unmount_all(self):
+        for volume in self.mounted_volumes:
+            row = self.table_widget.findItems(volume, Qt.MatchExactly)[0].row()
+            volume_name = self.table_widget.item(row, 1).text()
+            server_name = self.table_widget.item(row, 4).text()
+            button = self.table_widget.cellWidget(row, 0)
+            if terrablock_commands('unmount', server_name, volume_name):
+                button.setText('Mount')
+                button.setChecked(False)                
+                for col in range(1, 5):
+                    self.table_widget.item(row, col).setBackground(self.og_bg_color)
+        self.mounted_volumes = []
+        with open('.mounted.volumes', 'wb') as pickleFileHandler:
+            pickle.dump(self.mounted_volumes, pickleFileHandler)
+
+    # Popup warning error alerting user to check non empty folders before mounting Terrablock volume.
     def popup_error(self, volume_name):
         volume_name = volume_name.strip()
         file_path = '/media/' + volume_name + '/'
         QMessageBox.about(self, 'Error', f'Could not mount {volume_name}.  Please check to make sure {file_path} is empty.')
 
 if __name__ == '__main__':
-#     appctxt = ApplicationContext()       # 1. Instantiate ApplicationContext
+    terrablock = ApplicationContext()       # 1. Instantiate ApplicationContext
 
-    terrablock_app = QApplication.instance() # checks if QApplication already exists
-    if not terrablock_app: # create QApplication if it doesnt exist
-        terrablock_app = QApplication(sys.argv)
+    # terrablock_app = QApplication.instance() # checks if QApplication already exists
+    # if not terrablock_app: # create QApplication if it doesnt exist
+    #     terrablock_app = QApplication(sys.argv)
 
     ex = User_Input()
-    terrablock_app.exec_()
-#     sys.exit(terrablock_app.exec_())
+    # terrablock_app.exec_()
+    sys.exit(terrablock.app.exec_())
